@@ -165,6 +165,7 @@ abstract class Mage_Core_Block_Abstract extends Varien_Object
     
     
     protected $__qFile = false;
+    protected $__qFileLock = false;
     protected $__commandLine = "";
     
     /**
@@ -1386,16 +1387,14 @@ abstract class Mage_Core_Block_Abstract extends Varien_Object
       // if no cache cache, create lock and continue to generate html
       if(!$html)
       {
-        $fp = @fopen($lockFile,"w+");
+        $this->__qFileLock = @fopen($lockFile,"w+");
         
-        if(flock($fp, LOCK_EX | LOCK_NB))
+        if(flock($this->__qFileLock, LOCK_EX | LOCK_NB))
         {
-          fwrite($fp,$mypid);
+          fwrite($this->__qFileLock,$mypid);
           fflush($file);
-          flock($fp, LOCK_UN);
-          fclose($fp);
           
-          $this->__debug("{$cacheInfo}: locked!");
+          $this->__debug("{$cacheInfo}: locked by PID {$mypid}");
         } else{
           
           // lock fail (another process locked the file?)
@@ -1413,6 +1412,12 @@ abstract class Mage_Core_Block_Abstract extends Varien_Object
       if($this->__qFile)
       {
         @unlink($this->__qFile . ".lock");
+      }
+      
+      if($this->__qFileLock)
+      {
+        flock($__qFileLock, LOCK_UN);
+        fclose($__qFileLock);
       }
     }
     
