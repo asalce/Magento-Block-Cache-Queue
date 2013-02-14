@@ -164,10 +164,9 @@ abstract class Mage_Core_Block_Abstract extends Varien_Object
     protected $_sortInstructions = array();
     
     
-    protected $__beforeHTML = false;
-    protected $__hasHTML = false;
+    protected $__qFile = false;
     protected $__commandLine = "";
-    protected $__FP = false;
+    
     /**
      * Internal constructor, that is called from real constructor
      *
@@ -864,8 +863,6 @@ abstract class Mage_Core_Block_Abstract extends Varien_Object
                 $translate->setTranslateInline($this->getData('translate_inline'));
             }
             
-            //$this->_preBeforeToHtml(); // New
-            
             if(!($html = $this->_preBeforeToHtml()))
             {
               $this->_beforeToHtml();
@@ -880,7 +877,7 @@ abstract class Mage_Core_Block_Abstract extends Varien_Object
             }
         }
         
-        $this->_postAfterToHtml($html);
+        $this->_preAfterToHtml($html);
         $html = $this->_afterToHtml($html);
 
         /**
@@ -1340,8 +1337,6 @@ abstract class Mage_Core_Block_Abstract extends Varien_Object
         return '<!--SID=' . $cacheKey . '-->';
     }
     
-    
-    
     public function _preBeforeToHtml()
     {
       if (is_null($this->getCacheLifetime()) || !Mage::app()->useCache(self::CACHE_GROUP)) {
@@ -1349,26 +1344,28 @@ abstract class Mage_Core_Block_Abstract extends Varien_Object
       }
       
       $cacheInfo = md5($this->getCacheKey());
-      $this->__beforeHTML = MAGENTO_ROOT . "/var/cache/irad-" . $cacheInfo;
+      $this->__qFile = MAGENTO_ROOT . "/var/cache/irad-" . $cacheInfo;
       $mypid = getmypid();
       $this->__commandLine = file_get_contents('/proc/'.$mypid.'/cmdline');
       
-      $lockFile = $this->__beforeHTML . ".lock";
-      $waitFile = $this->__beforeHTML . ".pid.{$mypid}";
+      $lockFile = $this->__qFile . ".lock";
+      $waitFile = $this->__qFile . ".pid.{$mypid}";
       $lockPid = null;
       
       while(
-        @filesize($contentFile) ||
+        is_file($lockFile) && 
+        
+        // read PID only after checking if file exists
+        ($lockPid || $lockPid = file_get_contents($lockFile)) &&
+        
         (
-          (is_file($lockFile) || is_file($contentFile)) && 
-          ($lockPid || $lockPid = file_get_contents($lockFile)) &&
+          // PIDs are not unique 
+          // Make sure PID corresponds to a PHP instance
           (
-            (
-            $content = @file_get_contents('/proc/'.$lockPid.'/cmdline') &&
-            $content == $this->__commandLine
-            ) ||
-            !$content
-          )
+          $content = @file_get_contents('/proc/'.$lockPid.'/cmdline') &&
+          $content == $this->__commandLine
+          ) ||
+          !$content
         )
       )
       {
@@ -1377,14 +1374,16 @@ abstract class Mage_Core_Block_Abstract extends Varien_Object
           file_put_contents($waitFile,"");
           $this->__debug("pid: {$mypid} waiting for {$cacheInfo}");
         }
-        usleep(50000);
+        usleep(50000); // sleep for 50ms
       };
       
+      // remove wait file
       if(is_file($waitFile))
         @unlink($waitFile);
       
-      $html = $this->_preToHtml();
+      $html = $this->_loadCache();
       
+      // if no cache cache, create lock and continue to generate html
       if(!$html)
       {
         $fp = @fopen($lockFile,"w+");
@@ -1398,23 +1397,23 @@ abstract class Mage_Core_Block_Abstract extends Varien_Object
           
           $this->__debug("{$cacheInfo}: locked!");
         } else{
+          
+          // lock fail (another process locked the file?)
+          // go back to the beginning and wait for the cache
+          
           return $this->_preBeforeToHtml();
         }
       }
+      
       return $html;
     }
     
-    public function _postAfterToHtml( $html )
+    public function _preAfterToHtml( $html )
     {
-      if($this->__beforeHTML)
+      if($this->__qFile)
       {
-        @unlink($this->__beforeHTML . ".lock");
+        @unlink($this->__qFile . ".lock");
       }
-    }
-    
-    public function _preToHtml()
-    {
-      return $this->_loadCache();
     }
     
     public function __debug($txt){
